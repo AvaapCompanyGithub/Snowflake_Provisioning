@@ -1,0 +1,8 @@
+{
+  "access": {
+    "Read-Only (RO)": "RO",
+    "Read-Write (RW)": "RW",
+    "Governance (GOV)": "GOV"
+  },
+  "show_create_role": true
+}
