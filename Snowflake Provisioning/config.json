@@ -2,7 +2,15 @@
   "access": {
     "Read-Only (RO)": "RO",
     "Read-Write (RW)": "RW",
-    "Governance (GOV)": "GOV"
+    "Governance (GOV)": "GOV",
+    "AI Read-Only (AI)": "AI",
+    "Streamlit Apps - View Only (APP)": "APP"
   },
-  "show_create_role": true
+  "show_create_role": true,
+  "show_scim_warning": false,
+  "admin_roles": {
+    "RW":  ["TASK_ADMIN", "ALERT_ADMIN", "NOTIFY_ADMIN", "AI_USER"],
+    "GOV": ["DATAGOV_ADMIN"],
+    "AI":  ["AI_USER"]
+  }
 }

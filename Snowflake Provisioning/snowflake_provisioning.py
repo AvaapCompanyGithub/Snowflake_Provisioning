@@ -16,13 +16,7 @@ from snowflake.snowpark.context import get_active_session
 try:
     session = get_active_session()
 except Exception:
-    conn = st.connection("snowflake")
-    session = conn.session()
-else:
-    class _SessConn:
-        def query(self, sql, ttl=300):
-            return session.sql(sql).to_pandas()
-    conn = _SessConn()
+    session = st.connection("snowflake").session()
 
 # -------------------------------------------------
 # Page config
@@ -59,10 +53,7 @@ def _load_config():
     # Config is optional — fall back to defaults
     return {}, None
 
-try:
-    _cfg, _cfg_path = _load_config()
-except Exception:
-    _cfg, _cfg_path = {}, None
+_cfg, _cfg_path = _load_config()
 
 # ----------------------------------------------------------------------
 # Colors
@@ -240,6 +231,27 @@ except Exception:
 #Get values from config.json
 ACCESS = _cfg.get("access", {"Read-Only (RO)": "RO"})
 SHOW_CREATE_ROLE = bool(_cfg.get("show_create_role", True))
+SHOW_SCIM_WARNING = bool(_cfg.get("show_scim_warning", True))
+
+#One-line description per access type code, shown under the Access type dropdown
+ACCESS_HELP = {
+    "RO":  "Read-only data access: select on tables/views, use Streamlit apps. No AI.",
+    "RW":  "Full working access: read/write data, create objects, build and use AI (agents, Cortex Search, semantic views, models).",
+    "GOV": "Create masking policies, row access policies and tags.",
+    "AI":  "Read-only through AI: use agents, Cortex Analyst and Cortex Search. No direct table/view queries, no building AI objects.",
+    "APP": "View Streamlit apps only. No access to the underlying data.",
+}
+ACCESS_HELP.update({k.upper(): v for k, v in _cfg.get("access_help", {}).items()})
+
+#Admin roles per access type in config.json, e.g. {"RW": ["TASK_ADMIN", "AI_USER"], "AI": ["AI_USER"]}.
+#Turned into ROLE -> [ACCESS_TYPE, ...] for SP_GRANT_DBSCH_ACCESS, e.g. {"AI_USER": ["RW", "AI"]}.
+ADMIN_ROLES = {}
+for _access, _roles in _cfg.get("admin_roles", {}).items():
+    for _r in (_roles if isinstance(_roles, list) else [_roles]):
+        ADMIN_ROLES.setdefault(_r.upper(), []).append(_access.upper())
+
+#Built-in Snowflake roles - SP_GRANT_DBSCH_ACCESS always rejects these
+SYSTEM_ROLES = {"ACCOUNTADMIN", "SECURITYADMIN", "USERADMIN", "SYSADMIN", "ORGADMIN", "PUBLIC"}
 
 #DB List
 @st.cache_data(ttl=300, show_spinner=False)
@@ -254,11 +266,28 @@ def list_schemas(db):
     rows = session.sql(f'SHOW SCHEMAS IN DATABASE "{q}"').collect()
     return sorted(r["name"] for r in rows if r["name"] != "INFORMATION_SCHEMA")
 
+#Provisioned schema list - schemas with the _RO/_RW/_GOV database roles from SP_PROVISION_SCHEMA
+@st.cache_data(ttl=300, show_spinner=False)
+def list_provisioned_schemas(db):
+    q = db.replace('"', '""')
+    rows = session.sql(f'SHOW DATABASE ROLES IN DATABASE "{q}"').collect()
+    db_roles = {r["name"] for r in rows}
+    return [s for s in list_schemas(db)
+            if all(f"{db}_{s}_{a}" in db_roles for a in ("RO", "RW", "GOV"))]
+
 #Role list
 @st.cache_data(ttl=300, show_spinner=False)
 def list_roles():
     rows = session.sql("SHOW ROLES").collect()
-    return sorted(r["name"] for r in rows)
+    hidden = SYSTEM_ROLES | ADMIN_ROLES.keys()
+    return sorted(r["name"] for r in rows if r["name"] not in hidden)
+
+#Warehouse list - user-created warehouses owned by SYSADMIN
+@st.cache_data(ttl=300, show_spinner=False)
+def list_warehouses():
+    rows = session.sql("SHOW WAREHOUSES").collect()
+    return sorted(r["name"] for r in rows
+                  if r["owner"] == "SYSADMIN" and not r["name"].startswith("SYSTEM$"))
 
 # -------------------------------------------------
 # Helpers
@@ -306,15 +335,20 @@ def run(proc, *args):
     #details is an extra key in the JSON returned from the proc
     details = payload.get("details")
 
-    if payload.get("status") != "SUCCESS":
+    status = payload.get("status")
+
+    if status not in ("SUCCESS", "WARNING"):
         st.error(literal(payload.get("message", "Unknown error.")))
         if details:
             with st.expander("Details"):
                 st.json(details)
         return False
 
-    # success
-    st.success(literal(payload["message"]))
+    # success, or done with something skipped (WARNING)
+    if status == "WARNING":
+        st.warning(literal(payload.get("message", "Done, with warnings.")))
+    else:
+        st.success(literal(payload.get("message", "Done.")))
     if details:
         with st.expander("Details"):
             st.json(details)
@@ -350,7 +384,7 @@ st.divider()
 st.header("1. Database")
 st.caption("Create a new database, or update an existing one, as SYSADMIN.")
 db1 = pick_or_enter("Database", list_databases(), "s1_db")
-ret = st.number_input("Retention (days)", min_value=0, max_value=90,
+ret = st.number_input("Retention (days)", min_value=1, max_value=90,
                       value=1, step=1, key="s1_ret")
 if st.button("Provision database", key="s1_go", disabled=not db1):
     if run("UTIL_DB.ADMIN.SP_PROVISION_DB", db1, int(ret)):
@@ -362,31 +396,45 @@ st.divider()
 # Section 2: Schema
 st.header("2. Schema")
 st.caption("Create a new schema in existing database, as SYSADMIN. "
-           "Creates all the appropriate permissions.")
+           "Creates all the appropriate permissions. "
+           "Re-run on an existing schema to add newer access types (e.g. AI, APP) and refresh its grants.")
 db2 = st.selectbox("Database", list_databases(), index=None,
                    placeholder="Select…", key="s2_db")
 sch2 = st.text_input("Schema name", key="s2_sch").strip()
 if st.button("Provision schema", key="s2_go", disabled=not (db2 and sch2)):
     if run("UTIL_DB.ADMIN.SP_PROVISION_SCHEMA", db2, sch2):
         prefill("s3_db", db2, list_databases())
-        prefill(f"s3_sch_{db2}", sch2.upper(), list_schemas(db2))
+        prefill(f"s3_sch_{db2}", sch2.upper(), list_provisioned_schemas(db2))
 
 st.divider()
 
 # Section 3: Role
 st.header("3. Role")
-st.caption("Grant permissions on the database and schema to this role.")
+st.caption("Grant permissions on the database and schema to this role. "
+           "Only schemas provisioned in step 2 are listed.")
 db3 = st.selectbox("Database", list_databases(), index=None,
                    placeholder="Select…", key="s3_db")
 # keying on db3 resets the schema selection whenever the database changes
-sch3 = st.selectbox("Schema", list_schemas(db3) if db3 else [], index=None,
+sch3 = st.selectbox("Schema", list_provisioned_schemas(db3) if db3 else [], index=None,
                     placeholder="Select…", key=f"s3_sch_{db3}", disabled=not db3)
 role3 = pick_or_enter("Role", list_roles(), "s3_role")
 if SHOW_CREATE_ROLE:
     create3 = st.checkbox("Create role if it doesn't exist", key="s3_create")
+    if SHOW_SCIM_WARNING:
+        st.caption(":red[If SCIM provisioning is enabled and this role maps to an identity provider group "
+                   "(e.g. Entra ID, Okta), provision it through SCIM instead of creating it here.]")
 else:
     create3 = False
 access3 = st.selectbox("Access type", list(ACCESS), key="s3_access")
+if ACCESS_HELP.get(ACCESS[access3].upper()):
+    st.caption(ACCESS_HELP[ACCESS[access3].upper()])
+# admin roles from config.json that come with this access type (account-level privileges)
+extra3 = [r for r, a in ADMIN_ROLES.items() if ACCESS[access3] in a]
+if extra3:
+    st.caption(f"{access3} also grants {', '.join(extra3)} (account-level privileges).")
+wh3 = st.selectbox("Warehouse (optional)", list_warehouses(), index=None,
+                   placeholder="None", key="s3_wh")
 if st.button("Grant access", key="s3_go", disabled=not (db3 and sch3 and role3)):
     run("UTIL_DB.ADMIN.SP_GRANT_DBSCH_ACCESS",
-        db3, sch3, role3, ACCESS[access3], bool(create3))
+        db3, sch3, role3, ACCESS[access3], bool(create3),
+        wh3, json.dumps(ADMIN_ROLES))
