@@ -32,7 +32,7 @@ Each provisioned schema gets one database role per access type, named `<DB>_<SCH
 | **RO** (Read-Only) | Select on tables, views and other readable objects, and use of Streamlit apps. No AI. |
 | **RW** (Read-Write) | Everything RO has, plus insert, update, delete and truncate; creating objects; reading and writing stages; running functions and procedures. Also building and using AI objects: agents, Cortex Search services, semantic views and models. |
 | **GOV** (Governance) | Create masking policies, row access policies and tags. |
-| **AI** | Use of agents, Cortex Analyst (select and references on semantic views) and Cortex Search. **No direct queries on tables or views.** |
+| **AI** | Everything RO has, plus use of agents, Cortex Analyst (select and references on semantic views) and Cortex Search. No building AI objects. AI must include RO because agents query the tables behind a semantic view directly, as the user's role. |
 | **APP** | View Streamlit apps only. Apps run with their owner's rights, so no access to the underlying data is needed. |
 
 Future grants are used throughout, so objects created later in the schema are covered automatically. If Snowflake rejects a grant for an object type, the procedure skips it and lists it under `skipped_grants` in the result.
@@ -123,5 +123,6 @@ Roles that already have RW only get AI_USER after you re-run step 3 (Role) with 
 
 - **Ownership:** an object belongs to the account role that created it. RW gives other roles usage, modify, operate and monitor on AI objects, but changing the definition of a semantic view or Cortex Search service still needs its owner.
 - **Agents using a YAML semantic model on a stage:** AI users would also need read on that stage. Using semantic views avoids this.
+- **Tables in other schemas:** if a semantic view uses tables from another schema, AI users also need RO (or AI) on that schema.
 - **Warehouses:** AI and RW users need a warehouse to run queries. Pick one in step 3, or grant it separately.
 - **Protected roles:** ACCOUNTADMIN, SECURITYADMIN, USERADMIN, SYSADMIN, ORGADMIN, PUBLIC and the configured admin roles can never be the target role in step 3.

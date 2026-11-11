@@ -238,7 +238,7 @@ ACCESS_HELP = {
     "RO":  "Read-only data access: select on tables/views, use Streamlit apps. No AI.",
     "RW":  "Full working access: read/write data, create objects, build and use AI (agents, Cortex Search, semantic views, models).",
     "GOV": "Create masking policies, row access policies and tags.",
-    "AI":  "Read-only through AI: use agents, Cortex Analyst and Cortex Search. No direct table/view queries, no building AI objects.",
+    "AI":  "Read-Only plus AI: everything RO has, and use of agents, Cortex Analyst and Cortex Search. No building AI objects.",
     "APP": "View Streamlit apps only. No access to the underlying data.",
 }
 ACCESS_HELP.update({k.upper(): v for k, v in _cfg.get("access_help", {}).items()})

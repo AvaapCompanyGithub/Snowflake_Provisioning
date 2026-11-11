@@ -355,9 +355,11 @@ begin
     end for;
 
     --------------------------------------------------------------------
-    -- AI : read-only access through AI only (agents, Cortex Analyst,
-    -- Cortex Search). No direct SELECT on tables/views.
-    -- Querying a semantic view doesn't need SELECT on its base tables.
+    -- AI : RO plus use of AI objects (agents, Cortex Analyst,
+    -- Cortex Search). No building AI objects.
+    -- AI must have RO's SELECT: agents generate SQL against the physical
+    -- tables behind a semantic view, as the caller's role, so the
+    -- caller needs SELECT on those tables.
     -- Account-level AI rights (Cortex, AI functions, Snowflake
     -- Intelligence) come from the AI_USER role, not from here.
     --------------------------------------------------------------------
@@ -365,12 +367,31 @@ begin
     execute immediate 'grant usage on database ' || db     || ' to database role ' || ai_role;
     execute immediate 'grant usage on schema '   || fq_sch || ' to database role ' || ai_role;
 
-    -- Earlier versions had AI inherit RO - remove that on re-provision
+    -- SELECT on read-only object types (semantic views handled below)
+    let ai_sel array := array_construct(
+        'tables', 'hybrid tables',
+        'views', 'materialized views',
+        'dynamic tables', 'external tables', 'iceberg tables', 'streams');
+    for i in 0 to array_size(ai_sel) - 1 do
+        let o varchar := get(ai_sel, i)::varchar;
+        begin
+            step := 'AI - Grant select on ' || o;
+            execute immediate 'grant select on all '    || o || ' in schema ' || fq_sch || ' to database role ' || ai_role;
+            execute immediate 'grant select on future ' || o || ' in schema ' || fq_sch || ' to database role ' || ai_role;
+        exception
+            when other then
+                skipped := array_append(skipped, 'AI select: ' || o);
+        end;
+    end for;
+
+    -- USAGE on streamlits, as RO
     begin
-        step := 'AI - Revoke inherited RO';
-        execute immediate 'revoke database role ' || ro_role || ' from database role ' || ai_role;
+        step := 'AI - Grant usage on streamlits';
+        execute immediate 'grant usage on all streamlits in schema '    || fq_sch || ' to database role ' || ai_role;
+        execute immediate 'grant usage on future streamlits in schema ' || fq_sch || ' to database role ' || ai_role;
     exception
-        when other then null;  -- not granted
+        when other then
+            skipped := array_append(skipped, 'AI usage: streamlits');
     end;
 
     let ai_usage array := array_construct('agents', 'cortex search services');
