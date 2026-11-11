@@ -11,7 +11,7 @@ set AI_ROLE     = 'AI_USER';
 
 --Email notification recipients - comma-separated, e.g. 'a@acme.corp, b@acme.corp'
 --Each address must belong to a user in this account and be verified by that user (Snowsight > profile)
-set EMAIL_RECIPIENTS = 'lydia.mancini@avaap.com';
+set EMAIL_RECIPIENTS = 'some_email@acme.corp';
 
 --------------------------------------------------
 --TASKS
@@ -159,4 +159,3 @@ grant usage on SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT to r
 --grant modify on SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT to role <ROLE>;
 
 show grants to role identifier($AI_ROLE);
-

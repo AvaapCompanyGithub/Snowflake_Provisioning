@@ -19,7 +19,7 @@ mixins:
     grants:
       - privilege: USAGE
         role: SYSADMIN
-        with_grant_option: true
+        with_grant_option: false
     idle_auto_shutdown_time_seconds: 86400
     schedules:
       cron_exprs:
