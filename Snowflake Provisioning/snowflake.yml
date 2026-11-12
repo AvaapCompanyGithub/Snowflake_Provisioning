@@ -11,6 +11,11 @@ entities:
       name: SNOWFLAKE_PROVISIONING
 mixins:
   streamlit_shared:
+    artifacts:
+      - pyproject.toml
+      - snowflake_provisioning.py
+      - .streamlit/config.toml
+      - config.json
     title: Snowflake Provisioning
     query_warehouse: ADMIN_WH
     compute_pool: SYSTEM_COMPUTE_POOL_CPU
@@ -26,8 +31,3 @@ mixins:
         - 0 8 * * 1,2,3,4,5
       timezone: America/New_York
     main_file: snowflake_provisioning.py
-    artifacts:
-      - pyproject.toml
-      - snowflake_provisioning.py
-      - .streamlit/config.toml
-      - config.json
