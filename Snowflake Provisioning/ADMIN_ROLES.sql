@@ -66,7 +66,7 @@ declare
     stmt   varchar;
 begin
     select $EMAIL_RECIPIENTS into :recips;
-    stmt := 'create or replace notification integration EMAIL_INT type = email enabled = true allowed_recipients = ('''
+    stmt := 'create notification if not exists integration EMAIL_INT type = email enabled = true allowed_recipients = ('''
             || replace(replace(recips, ' ', ''), ',', ''', ''') || ''')';
     execute immediate stmt;
     return stmt;
