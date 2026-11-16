@@ -11,7 +11,8 @@ set AI_ROLE     = 'AI_USER';
 
 --Email notification recipients - comma-separated, e.g. 'a@acme.corp, b@acme.corp'
 --Each address must belong to a user in this account and be verified by that user (Snowsight > profile)
-set EMAIL_RECIPIENTS = 'some_email@acme.corp';
+set EMAIL_INT_NAME   = 'EMAIL_INT';
+set EMAIL_RECIPIENTS = 'lydia.mancini@avaap.com';
 
 --------------------------------------------------
 --TASKS
@@ -62,14 +63,35 @@ use role ACCOUNTADMIN;
 --so build the statement in a scripting block. Returns the statement it ran.
 execute immediate $$
 declare
-    recips varchar;
-    stmt   varchar;
+    int_name   varchar;
+    recips     varchar;
+    recip_list varchar;
+    stmt1      varchar;
+    stmt2      varchar;
 begin
-    select $EMAIL_RECIPIENTS into :recips;
-    stmt := 'create notification if not exists integration EMAIL_INT type = email enabled = true allowed_recipients = ('''
-            || replace(replace(recips, ' ', ''), ',', ''', ''') || ''')';
-    execute immediate stmt;
-    return stmt;
+    select $EMAIL_INT_NAME, $EMAIL_RECIPIENTS into :int_name, :recips;
+
+    -- 1. Create disabled, no recipient list (ENABLED is required for TYPE = EMAIL)
+    stmt1 := 'create notification integration if not exists ' || int_name
+             || ' type = email enabled = true';
+    --execute immediate stmt1;
+
+    -- 2. Merge existing ALLOWED_RECIPIENTS with new ones, dedupe
+    execute immediate 'describe integration ' || int_name;
+
+    select listagg(distinct '''' || lower(trim(t.value)) || '''', ', ')
+      into :recip_list
+      from (select translate("property_value", '[]" ', '') as v
+              from table(result_scan(last_query_id()))
+             where "property" = 'ALLOWED_RECIPIENTS') d,
+           lateral split_to_table(d.v || ',' || replace(:recips, ' ', ''), ',') t
+     where trim(t.value) <> '';
+
+    stmt2 := 'alter notification integration ' || int_name
+             || ' set allowed_recipients = (' || recip_list || ') enabled = true';
+    --execute immediate stmt2;
+
+    return stmt1 || ';\n' || stmt2;
 end;
 $$;
 
