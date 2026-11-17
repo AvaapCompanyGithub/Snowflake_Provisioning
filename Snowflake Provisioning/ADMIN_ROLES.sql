@@ -121,63 +121,66 @@ grant apply tag on account to role identifier($GOV_ROLE);
 grant apply masking policy on account to role identifier($GOV_ROLE);
 grant apply row access policy on account to role identifier($GOV_ROLE);
 
---------------------------------------------------
---AI
-
 use role ACCOUNTADMIN;
 
---Once per account
+--Intelligence Object - Once per account
 create SNOWFLAKE INTELLIGENCE if not exists SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT;
 
---Take AI off for PUBLIC - run once
-use role SECURITYADMIN;
+--SYSADMIN only
+-- Change the CoWork object: add or remove agents and change its settings
+grant modify on SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT to role SYSADMIN;
+-- View AI Gateway activity and usage
+grant monitor on AI GATEWAY SNOWFLAKE to role SYSADMIN;
 
-revoke database role SNOWFLAKE.CORTEX_USER from role PUBLIC;
-revoke database role SNOWFLAKE.COPILOT_USER from role PUBLIC;
-revoke USE AI FUNCTIONS on account from role PUBLIC;
-revoke application role SNOWFLAKE."CORTEX-MODEL-ROLE-ALL" from role PUBLIC;
-call SNOWFLAKE.LOCAL.REVOKE_FROM_PUBLIC_APPLICATION_ROLE('APP_ROLE', 'CORTEX-MODEL-ROLE-ALL');
-revoke usage on ai gateway SNOWFLAKE from role PUBLIC;  --system grant shown as AI_GATEWAY / SNOWFLAKE
+--------------------------------------------------
+-- AI
 
---Check
-show grants to role PUBLIC;                      -- no CORTEX_USER, AI_FUNCTIONS_USER, CORTEX_EMBED_USER, CORTEX_AGENT_USER, USE AI FUNCTION*
-show grants to application role SNOWFLAKE.PUBLIC; -- CORTEX-MODEL-ROLE-ALL must be gone
-
-/*
---Restore AI to PUBLIC (undo the revokes above) - every user gets AI again
+--Defaults
 use role ACCOUNTADMIN;
 
-grant database role SNOWFLAKE.CORTEX_USER to role PUBLIC;
-grant database role SNOWFLAKE.COPILOT_USER to role PUBLIC;
-grant use ai functions on account to role PUBLIC;
-grant application role SNOWFLAKE."CORTEX-MODEL-ROLE-ALL" to role PUBLIC;
-grant usage on ai gateway SNOWFLAKE to role PUBLIC;
+--Intelligence Object - Once per account
+create SNOWFLAKE INTELLIGENCE if not exists SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT;
 
---The REVOKE_FROM_PUBLIC_APPLICATION_ROLE call above has no documented undo procedure.
---The PUBLIC grant above gives the same model access. If a model is still blocked, check with Snowflake support.
+--SYSADMIN only
+--Change the CoWork object: add or remove agents and change its settings
+grant modify on SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT to role SYSADMIN;
+--View AI Gateway activity and usage
+grant monitor on AI GATEWAY SNOWFLAKE to role SYSADMIN;
 
-show grants to role PUBLIC;
-show grants to application role SNOWFLAKE.PUBLIC;
+--New Role
 
 use role SECURITYADMIN;
-*/
 
---Admin role
 create role if not exists identifier($AI_ROLE)
     comment = 'Carries account-level AI privileges (Cortex, AI functions, Snowflake Intelligence) for grant to functional roles';
 
 grant role identifier($AI_ROLE) to role SYSADMIN;
 
+--Grant AI perms to the new role and SYSADMIN
+
 use role ACCOUNTADMIN;
 
-grant database role SNOWFLAKE.CORTEX_USER to role identifier($AI_ROLE);
-grant use ai functions on account to role identifier($AI_ROLE);
-grant application role SNOWFLAKE."CORTEX-MODEL-ROLE-ALL" to role identifier($AI_ROLE);
-grant usage on ai gateway SNOWFLAKE to role identifier($AI_ROLE);  --was revoked from PUBLIC above
+declare
+    roles array default array_construct('SYSADMIN', $AI_ROLE);
+    r string;
 
-grant usage on SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT to role identifier($AI_ROLE);
---MODIFY intentionally not granted: it lets holders add/remove agents in Snowflake Intelligence for the whole account.
---Grant it directly to a specific admin role if needed:
---grant modify on SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT to role <ROLE>;
+begin
+    for i in 0 to array_size(roles) - 1 do
+        r := roles[i]::string;
+
+        --Cortex AI features: CoCo, Cortex Agents, Cortex Search, AI functions
+        execute immediate 'grant database role SNOWFLAKE.CORTEX_USER to role ' || r;
+        -- Account-level permission to call AI functions (AI_COMPLETE, AI_CLASSIFY, etc.)
+        execute immediate 'grant use AI FUNCTIONS on account to role ' || r;
+        --All current and future LLMs (model access is controlled only by model RBAC)
+        execute immediate 'grant application role SNOWFLAKE."CORTEX-MODEL-ROLE-ALL" to role ' || r;
+        -- Route AI requests through Snowflake's AI Gateway (system grant shown as AI_GATEWAY / SNOWFLAKE)
+        execute immediate 'grant usage on AI GATEWAY SNOWFLAKE to role ' || r;
+        --Create and run scheduled, unattended agent automations (CoWork/CoCo Automations)
+        execute immediate 'grant EXECUTE AGENT TASK on account to role ' || r;
+        --See and use agents in CoWork
+        execute immediate 'grant usage on SNOWFLAKE INTELLIGENCE SNOWFLAKE_INTELLIGENCE_OBJECT_DEFAULT to role ' || r;
+    end for;
+end;
 
 show grants to role identifier($AI_ROLE);
